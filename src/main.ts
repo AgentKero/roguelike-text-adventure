@@ -2,18 +2,10 @@
 require('file-loader?name=[name].[ext]!./public/index.html');
 require('file-loader?name=[name].[ext]!./public/styles.css');
 require('file-loader?name=[name].[ext]!./public/favicon.png');
-
-import { WindowRoot } from './interface/window-root';
-import { Borders, BORDER_DOUBLE, PADDING_EVEN } from './interface/borders';
-import { TitlePosition, WindowBase } from './interface/window';
-import { FillDirection, WindowText } from './interface/window-text';
-import { WindowTextinput } from './interface/window-textinput';
-import { GameManager } from './game/game-manager';
-import { richText, richTextLink } from './text/richtext';
+require('file-loader?name=[name].[ext]!./public/flower.png');
 
 function main() {
   const docMain = document.getElementById('main');
-  setDarkMode(true);
   if (docMain == null) {
     throw new Error('failed to find main element');
   }
@@ -23,62 +15,232 @@ function main() {
 }
 
 function buildWindow(el = document.body) {
-  const windowRoot = new WindowRoot(el);
-  windowRoot.title = ' DEFINITELY A REAL GAME ';
-  windowRoot.borders = BORDER_DOUBLE;
-  windowRoot.titlePosition = 1;
+  new WindowRoot(el);
+}
 
-  const contentFrame = new WindowBase('content_frame');
-  contentFrame.contentDirection = 0;
-  windowRoot.addChild(contentFrame);
+class WindowRoot {
+  private canvas: HTMLCanvasElement;
+  private static instance: WindowRoot;
+  private tickRate: number = (1 / 120) * 1000;
+  private lastFrametime: number;
+  private scale: number = 2;
 
-  const textLog = new WindowText('text_log');
-  textLog.padding = PADDING_EVEN;
-  textLog.addMessage(
-    richText([
-      richText(
-        'Your palms make a wet slap on the cold metal floor as you drop trembling from your bay, for the first time, again.\nYou are in a bare metal room save for the empty ',
-      ),
-      richText('space suit', [richTextLink()]),
-      richText(' that silently stood watch, waiting, while you slept.\nOn the '),
-      richText('starboard wall', [richTextLink()]),
-      richText(' is a hatch with a '),
-      richText('lever', [richTextLink()]),
-      richText(' beside it.\n\nYou have nothing.'),
-    ]),
-  );
-  textLog.fillDirection = FillDirection.bottomUp;
-  contentFrame.addChild(textLog);
+  private path: Path;
 
-  const statusPanel = new WindowBase('status_panel');
-  statusPanel.titlePosition = TitlePosition.center;
-  statusPanel.borders = new Borders('│', '', ' ', '', '│', '', '│', '');
-  statusPanel.sizeWeight = 0;
-  statusPanel.sizeMin = 20;
-  contentFrame.addChild(statusPanel);
+  bees: Bee[];
+  private flowers: Flower[];
 
-  const textField = new WindowTextinput();
-  textField.borders = new Borders('', '', '─', '', '─', '─', '', '');
-  textField.sizeMin = 4;
-  windowRoot.addChild(textField);
+  constructor(el: HTMLElement) {
+    if (WindowRoot.instance !== undefined) {
+      throw 'attempted to create a new window root when one already exists!';
+    }
+    el.textContent = '';
+    WindowRoot.instance = this;
+    this.canvas = document.createElement('canvas');
+    el.appendChild(this.canvas);
+    this.canvas.width = 400;
+    this.canvas.height = 400;
 
-  windowRoot.changed = true;
-  WindowRoot.redraw();
+    this.canvas.style = `
+    width: 1024px;
+    height: 1024px;
+    `;
 
-  const gameManager = new GameManager();
-  gameManager.textLog = textLog;
-  textField.addEventListener('submittext', gameManager.onCommandSubmitted.bind(gameManager));
+    this.path = new Path([new Vector2(0, 0), new Vector2(60, 60), new Vector2(-60, 60)]);
+
+    this.bees = [new Bee(this.path)];
+    this.flowers = [new Flower(new Vector2(30, 30), 8), new Flower(new Vector2(-30, 30), 8)];
+
+    this.lastFrametime = Date.now();
+    this.update();
+  }
+
+  static getCurrent(): WindowRoot {
+    return WindowRoot.instance;
+  }
+
+  private async update(): Promise<void> {
+    const frameTime = Date.now();
+    const deltaTMS = frameTime - this.lastFrametime;
+    this.lastFrametime = frameTime;
+
+    const deltaT = deltaTMS / 1000;
+
+    for (const bee of this.bees) {
+      bee.update(deltaT);
+    }
+
+    for (const flower of this.flowers) {
+      flower.update(deltaT);
+    }
+
+    const context = this.canvas.getContext('2d');
+    if (context != null) {
+      context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      for (const flower of this.flowers) {
+        flower.draw(context, this.canvas, this.scale);
+      }
+
+      for (const bee of this.bees) {
+        bee.draw(context, this.canvas, this.scale);
+      }
+    }
+
+    const remainder = Date.now() - frameTime;
+    setTimeout(this.update.bind(this), Math.max(this.tickRate - remainder, 0));
+  }
+}
+
+class Vector2 {
+  x: number;
+  y: number;
+  length: number;
+  constructor(x: number, y: number) {
+    this.x = x;
+    this.y = y;
+    this.length = Math.sqrt(this.x * this.x + this.y * this.y);
+  }
+
+  private fixedNumber(num: number): string {
+    if (num > 0) {
+      return ' ' + num.toFixed(2);
+    }
+    return num.toFixed(2);
+  }
+
+  public print(): string {
+    return `${this.fixedNumber(this.x)}, ${this.fixedNumber(this.y)}`;
+  }
+
+  public lerp(other: Vector2, t: number): Vector2 {
+    return new Vector2(this.x - (this.x - other.x) * t, this.y - (this.y - other.y) * t);
+  }
+
+  public add(other: Vector2): Vector2 {
+    return new Vector2(this.x + other.x, this.y + other.y);
+  }
+
+  public subtract(other: Vector2): Vector2 {
+    return new Vector2(this.x - other.x, this.y - other.y);
+  }
+
+  public scale(other: Vector2): Vector2 {
+    return new Vector2(this.x * other.x, this.y * other.y);
+  }
+}
+
+class Path {
+  positions: Vector2[];
+  constructor(positions: Vector2[]) {
+    this.positions = positions;
+  }
+}
+
+abstract class GameObject {
+  abstract getPosition(): Vector2;
+  abstract update(deltaT: number): void;
+
+  abstract drawImpl(
+    context: CanvasRenderingContext2D,
+    canvas: HTMLCanvasElement,
+    _scale: number,
+  ): void;
+
+  draw(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, scale: number): void {
+    context.fillStyle = 'black';
+    context.strokeStyle = 'black';
+    this.drawImpl(context, canvas, scale);
+  }
+
+  getTransformedPosition(canvas: HTMLCanvasElement, scale: number): Vector2 {
+    return this.getPosition()
+      .scale(new Vector2(scale, scale))
+      .add(new Vector2(canvas.width / 2, canvas.height / 2));
+  }
+}
+
+class Bee extends GameObject {
+  path: Path;
+  currentNode: number = 0;
+  pathPosition: number = 0;
+
+  constructor(path: Path) {
+    super();
+    this.path = path;
+  }
+
+  public update(deltaT: number) {
+    this.pathPosition += deltaT;
+    if (this.pathPosition > 1) {
+      this.pathPosition -= 1;
+      this.currentNode += 1;
+      if (this.currentNode >= this.path.positions.length) {
+        this.currentNode = 0;
+      }
+    }
+  }
+
+  public getPosition(): Vector2 {
+    const nextNode = this.currentNode + 1 < this.path.positions.length ? this.currentNode + 1 : 0;
+    return this.path.positions[this.currentNode].lerp(
+      this.path.positions[nextNode],
+      this.pathPosition,
+    );
+  }
+
+  public drawImpl(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, scale: number) {
+    const pos = this.getTransformedPosition(canvas, scale);
+    context.fillRect(pos.x, pos.y, 2, 2);
+  }
+}
+
+class Flower extends GameObject {
+  position: Vector2;
+  radius: number;
+  isColliding: boolean = false;
+  sprite: HTMLImageElement;
+
+  constructor(position: Vector2, radius: number) {
+    super();
+    this.position = position;
+    this.radius = radius;
+    this.sprite = new Image();
+    this.sprite.src = 'http://localhost:3000/flower.png';
+  }
+
+  update(_deltaT: number): void {
+    this.isColliding = WindowRoot.getCurrent().bees.some((bee) =>
+      this.checkPointColliding(bee.getPosition()),
+    );
+  }
+
+  checkPointColliding(point: Vector2): boolean {
+    return point.subtract(this.position).length <= this.radius;
+  }
+
+  getPosition(): Vector2 {
+    return this.position;
+  }
+
+  drawImpl(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, scale: number) {
+    const pos = this.getTransformedPosition(canvas, scale);
+    const spriteDim = new Vector2(this.sprite.width * scale, this.sprite.height * scale);
+    if (this.isColliding) {
+      context.fillStyle = 'green';
+      context.beginPath();
+      context.arc(pos.x, pos.y, this.radius * scale, 0, 2 * Math.PI, false);
+      context.fill();
+      context.closePath();
+    }
+
+    context.drawImage(
+      this.sprite,
+      pos.x - spriteDim.x / 2 - 1,
+      pos.y - spriteDim.y / 2 + 1,
+      spriteDim.x,
+      spriteDim.y,
+    );
+  }
 }
 
 main();
-
-function setDarkMode(dark: boolean) {
-  const CLASS_DARK = 'dark';
-  if (dark && !document.body.classList.contains(CLASS_DARK)) {
-    document.body.classList.add(CLASS_DARK);
-    return;
-  }
-  if (!dark && document.body.classList.contains(CLASS_DARK)) {
-    document.body.classList.remove(CLASS_DARK);
-  }
-}

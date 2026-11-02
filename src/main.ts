@@ -38,8 +38,8 @@ class WindowRoot {
     WindowRoot.instance = this;
     this.canvas = document.createElement('canvas');
     el.appendChild(this.canvas);
-    this.canvas.width = 400;
-    this.canvas.height = 400;
+    this.canvas.width = 600;
+    this.canvas.height = 600;
 
     this.canvas.style = `
     width: 1024px;
@@ -76,6 +76,7 @@ class WindowRoot {
 
     const context = this.canvas.getContext('2d');
     if (context != null) {
+      context.imageSmoothingEnabled = false;
       context.clearRect(0, 0, this.canvas.width, this.canvas.height);
       for (const flower of this.flowers) {
         flower.draw(context, this.canvas, this.scale);
